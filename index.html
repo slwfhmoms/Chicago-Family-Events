@@ -451,8 +451,13 @@ async function scrapeUrl() {
       })
     });
     const data = await res.json();
-    const text = data.content.find(b=>b.type==='text')?.text||'';
-    const clean = text.replace(/```json|```/g,'').trim();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    if (data.type === 'error') throw new Error(data.error?.message || 'API error');
+    const text = data.content?.find(b=>b.type==='text')?.text||'';
+    if (!text) throw new Error('No response from API — check your Anthropic key');
+    let clean = text.replace(/```json|```/g,'').trim();
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    if (jsonMatch) clean = jsonMatch[0];
     const events = JSON.parse(clean);
     const arr = Array.isArray(events) ? events : [events];
     mergeEvents(arr, 'scraped', url);
@@ -462,7 +467,13 @@ async function scrapeUrl() {
     showToast(count === 1 ? `Added: ${arr[0].name}` : `Added ${count} events`);
     setStatus('');
   } catch(e) {
-    setStatus('⚠️ Couldn\'t extract events — try a different URL');
+    console.error('URL scrape error:', e);
+    const msg = e?.message || String(e);
+    if (msg.includes('Failed to fetch') || msg.includes('CORS')) {
+      setStatus('⚠️ Network/CORS error — check your Anthropic key in ⚙️ settings');
+    } else {
+      setStatus('⚠️ Error: ' + msg.slice(0,150));
+    }
   }
 }
 
@@ -502,8 +513,16 @@ async function extractFromImage() {
       })
     });
     const data = await res.json();
-    const text = data.content.find(b=>b.type==='text')?.text||'';
-    const clean = text.replace(/```json|```/g,'').trim();
+    // Check for API errors
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    if (data.type === 'error') throw new Error(data.error?.message || 'API error');
+    const text = data.content?.find(b=>b.type==='text')?.text||'';
+    if (!text) throw new Error('No response from API — check your Anthropic key');
+    // Try to extract JSON from the response
+    let clean = text.replace(/```json|```/g,'').trim();
+    // Find JSON array if buried in text
+    const jsonMatch = clean.match(/\[[\s\S]*\]/);
+    if (jsonMatch) clean = jsonMatch[0];
     const events = JSON.parse(clean);
     const arr = Array.isArray(events) ? events : [events];
     // Upload image to Imgbb for permanent hosting
@@ -521,7 +540,15 @@ async function extractFromImage() {
     showToast(count === 1 ? `Added: ${arr[0].name}` : `Added ${count} events from image`);
     setStatus('');
   } catch(err) {
-    setStatus('⚠️ Couldn\'t extract events from image — try a clearer screenshot');
+    console.error('Image extraction error:', err);
+    const msg = err?.message || String(err);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS')) {
+      setStatus('⚠️ Network/CORS error — your Anthropic key may be wrong, or try adding events via chat instead');
+    } else if (msg.includes('401') || msg.includes('403')) {
+      setStatus('⚠️ Invalid Anthropic API key — double-check it in ⚙️ settings');
+    } else {
+      setStatus('⚠️ Error: ' + msg.slice(0,150));
+    }
   }
   document.getElementById('img-btn').disabled = false;
 }
