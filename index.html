@@ -227,6 +227,7 @@
 // Keys stored in localStorage — set them via the ⚙️ settings panel
 function getEBToken() { return localStorage.getItem('cfe_eb_token') || ''; }
 function getIMGBBKey() { return localStorage.getItem('cfe_imgbb_key') || ''; }
+function getAnthropicKey() { return localStorage.getItem('cfe_anthropic_key') || ''; }
 
 const TAG_LABELS = {
   festival:'Festival', arts:'Arts', nature:'Nature', cultural:'Cultural',
@@ -437,10 +438,11 @@ const EXTRACT_SYSTEM = `You are a Chicago family events extractor. Extract ALL e
 async function scrapeUrl() {
   const url = document.getElementById('url-input').value.trim();
   if (!url) return;
+  if (!getAnthropicKey()) { setStatus('⚠️ Add your Anthropic API key via the ⚙️ settings button to use this feature.'); return; }
   setStatus('<span class="spinner"></span> Reading page — extracting events…');
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json', 'x-api-key': getAnthropicKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:2000,
         tools:[{type:'web_search_20250305',name:'web_search'}],
@@ -484,11 +486,12 @@ function previewImage(input) {
 
 async function extractFromImage() {
   if (!uploadedImageData) return;
+  if (!getAnthropicKey()) { setStatus('⚠️ Add your Anthropic API key via the ⚙️ settings button to use this feature.'); return; }
   setStatus('<span class="spinner"></span> Reading image — extracting events…');
   document.getElementById('img-btn').disabled = true;
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json', 'x-api-key': getAnthropicKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:2000,
         system: EXTRACT_SYSTEM,
@@ -526,10 +529,11 @@ async function extractFromImage() {
 async function runAISearch() {
   const query = document.getElementById('ai-input').value.trim();
   if (!query) return;
+  if (!getAnthropicKey()) { setStatus('⚠️ Add your Anthropic API key via the ⚙️ settings button to use this feature.'); return; }
   setStatus('<span class="spinner"></span> Searching…');
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json', 'x-api-key': getAnthropicKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:1000,
         system:`Filter Chicago family events to match the query. Return ONLY a JSON array of matching events from this list, each with all original fields preserved. If nothing matches, add 1-3 new plausible Chicago family events. No markdown.\n\nEvents: ${JSON.stringify(allEvents())}`,
@@ -748,6 +752,7 @@ function renderCards() {
 function openSettings() {
   document.getElementById('settings-eb').value = getEBToken();
   document.getElementById('settings-imgbb').value = getIMGBBKey();
+  document.getElementById('settings-anthropic').value = getAnthropicKey();
   updateKeyStatuses();
   document.getElementById('settings-modal').classList.add('show');
 }
@@ -759,10 +764,13 @@ function closeSettings() {
 function saveSettings() {
   const eb = document.getElementById('settings-eb').value.trim();
   const imgbb = document.getElementById('settings-imgbb').value.trim();
+  const anthropic = document.getElementById('settings-anthropic').value.trim();
   if (eb) localStorage.setItem('cfe_eb_token', eb);
   else localStorage.removeItem('cfe_eb_token');
   if (imgbb) localStorage.setItem('cfe_imgbb_key', imgbb);
   else localStorage.removeItem('cfe_imgbb_key');
+  if (anthropic) localStorage.setItem('cfe_anthropic_key', anthropic);
+  else localStorage.removeItem('cfe_anthropic_key');
   closeSettings();
   showToast('Keys saved!');
   if (eb) loadEventbrite();
@@ -771,8 +779,10 @@ function saveSettings() {
 function updateKeyStatuses() {
   const ebEl = document.getElementById('eb-status');
   const imgbbEl = document.getElementById('imgbb-status');
+  const anthropicEl = document.getElementById('anthropic-status');
   if (ebEl) ebEl.innerHTML = getEBToken() ? '<span class="key-set">✓ set</span>' : '<span class="key-missing">not set</span>';
   if (imgbbEl) imgbbEl.innerHTML = getIMGBBKey() ? '<span class="key-set">✓ set</span>' : '<span class="key-missing">not set</span>';
+  if (anthropicEl) anthropicEl.innerHTML = getAnthropicKey() ? '<span class="key-set">✓ set</span>' : '<span class="key-missing">not set</span>';
 }
 
 document.getElementById('ai-input').addEventListener('keydown',e=>{if(e.key==='Enter')runAISearch();});
@@ -796,6 +806,10 @@ loadEventbrite();
     <label>Imgbb API Key <span class="key-status" id="imgbb-status"></span></label>
     <input type="password" id="settings-imgbb" placeholder="Paste your Imgbb API key..." />
     <div class="modal-hint">Get yours at <a href="https://api.imgbb.com" target="_blank">api.imgbb.com</a></div>
+
+    <label>Anthropic API Key <span class="key-status" id="anthropic-status"></span></label>
+    <input type="password" id="settings-anthropic" placeholder="Paste your Anthropic API key..." />
+    <div class="modal-hint">Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> — powers URL scraping, image upload & AI search</div>
 
     <div class="modal-actions">
       <button onclick="closeSettings()">Cancel</button>
