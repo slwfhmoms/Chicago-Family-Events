@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -120,6 +119,23 @@
   .upload-preview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--text-secondary); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .settings-btn { position: fixed; bottom: 1.5rem; right: 1.5rem; width: 40px; height: 40px; border-radius: 50%; background: var(--bg); border: 0.5px solid var(--border-med); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.12); z-index: 99; font-size: 18px; color: var(--text-secondary); }
+  .settings-btn:hover { background: var(--bg-secondary); }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--bg); border-radius: var(--radius-lg); padding: 1.5rem; width: 90%; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+  .modal h2 { font-size: 16px; font-weight: 500; margin-bottom: 4px; }
+  .modal p { font-size: 12px; color: var(--text-secondary); margin-bottom: 1.25rem; line-height: 1.5; }
+  .modal label { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; margin-top: 12px; }
+  .modal input { width: 100%; padding: 8px 10px; font-size: 13px; border-radius: var(--radius-md); border: 0.5px solid var(--border-med); background: var(--bg-secondary); color: var(--text); font-family: monospace; }
+  .modal input:focus { border-color: var(--border-info); outline: none; }
+  .modal-hint { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
+  .modal-hint a { color: var(--text-info); }
+  .modal-actions { display: flex; gap: 8px; margin-top: 1.25rem; justify-content: flex-end; }
+  .modal-save { background: var(--bg-info); color: var(--text-info); border-color: var(--border-info); font-weight: 500; }
+  .key-status { display: inline-block; font-size: 11px; margin-left: 6px; }
+  .key-set { color: var(--text-success); }
+  .key-missing { color: var(--text-warning); }
   @media (max-width: 600px) {
     .header-row { flex-direction: column; }
     .search-wrap { margin-left: 0; }
@@ -208,8 +224,9 @@
 <div class="toast" id="toast"><i class="ti ti-check"></i><span id="toast-msg"></span></div>
 
 <script>
-const EB_TOKEN = 'GW6EY2BZJQAZJP6C23RZ';
-const IMGBB_KEY = 'a10068c7a6d433d5b11d96aa9645c8d5'; // get free key at imgbb.com/api
+// Keys stored in localStorage — set them via the ⚙️ settings panel
+function getEBToken() { return localStorage.getItem('cfe_eb_token') || ''; }
+function getIMGBBKey() { return localStorage.getItem('cfe_imgbb_key') || ''; }
 
 const TAG_LABELS = {
   festival:'Festival', arts:'Arts', nature:'Nature', cultural:'Cultural',
@@ -318,8 +335,8 @@ function ebCatToTag(id) {
 }
 
 async function loadEventbrite() {
-  if (EB_TOKEN === 'PASTE_YOUR_NEW_TOKEN_HERE') {
-    setStatus('⚠️ Add your Eventbrite token to the HTML file to enable live events.');
+  if (!getEBToken()) {
+    setStatus('⚠️ Add your Eventbrite token via the ⚙️ settings button (bottom right).');
     return;
   }
   const btn = document.getElementById('refresh-btn');
@@ -332,7 +349,7 @@ async function loadEventbrite() {
       `https://www.eventbriteapi.com/v3/events/search/?location.address=Chicago,IL&location.within=15mi&q=family+kids&start_date.range_start=${now}&expand=venue,ticket_classes&page_size=50`,
       `https://www.eventbriteapi.com/v3/events/search/?location.address=Chicago,IL&location.within=15mi&categories=1,103,110&start_date.range_start=${now}&expand=venue,ticket_classes&page_size=50`
     ];
-    const results = await Promise.all(urls.map(u => fetch(u,{headers:{Authorization:`Bearer ${EB_TOKEN}`}}).then(r=>r.json())));
+    const results = await Promise.all(urls.map(u => fetch(u,{headers:{Authorization:`Bearer ${getEBToken()}`}}).then(r=>r.json())));
     const seen = new Set(CURATED.map(e=>e.name.toLowerCase().trim()));
     const fresh = [];
     results.forEach(data => {
@@ -557,11 +574,11 @@ function eventDescription(e) {
 }
 
 async function uploadToImgbb(base64Data, mimeType) {
-  if (!IMGBB_KEY || IMGBB_KEY === 'PASTE_YOUR_IMGBB_KEY_HERE') return null;
+  if (!getIMGBBKey()) return null;
   try {
     const form = new FormData();
     form.append('image', base64Data);
-    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${getIMGBBKey()}`, {
       method: 'POST', body: form
     });
     const data = await res.json();
@@ -728,6 +745,36 @@ function renderCards() {
   }).join('');
 }
 
+function openSettings() {
+  document.getElementById('settings-eb').value = getEBToken();
+  document.getElementById('settings-imgbb').value = getIMGBBKey();
+  updateKeyStatuses();
+  document.getElementById('settings-modal').classList.add('show');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('show');
+}
+
+function saveSettings() {
+  const eb = document.getElementById('settings-eb').value.trim();
+  const imgbb = document.getElementById('settings-imgbb').value.trim();
+  if (eb) localStorage.setItem('cfe_eb_token', eb);
+  else localStorage.removeItem('cfe_eb_token');
+  if (imgbb) localStorage.setItem('cfe_imgbb_key', imgbb);
+  else localStorage.removeItem('cfe_imgbb_key');
+  closeSettings();
+  showToast('Keys saved!');
+  if (eb) loadEventbrite();
+}
+
+function updateKeyStatuses() {
+  const ebEl = document.getElementById('eb-status');
+  const imgbbEl = document.getElementById('imgbb-status');
+  if (ebEl) ebEl.innerHTML = getEBToken() ? '<span class="key-set">✓ set</span>' : '<span class="key-missing">not set</span>';
+  if (imgbbEl) imgbbEl.innerHTML = getIMGBBKey() ? '<span class="key-set">✓ set</span>' : '<span class="key-missing">not set</span>';
+}
+
 document.getElementById('ai-input').addEventListener('keydown',e=>{if(e.key==='Enter')runAISearch();});
 document.getElementById('url-input').addEventListener('keydown',e=>{if(e.key==='Enter')scrapeUrl();});
 document.querySelector('[data-filter="all"]').className='filter-btn active-all';
@@ -735,5 +782,26 @@ populateNeighborhoods();
 renderCards();
 loadEventbrite();
 </script>
+<button class="settings-btn" onclick="openSettings()" title="API Key Settings">⚙️</button>
+
+<div class="modal-overlay" id="settings-modal" onclick="e => { if(e.target===this) closeSettings(); }">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>⚙️ API Key Settings</h2>
+    <p>Your keys are saved in this browser only — they're never sent anywhere except the services below.</p>
+
+    <label>Eventbrite Private Token <span class="key-status" id="eb-status"></span></label>
+    <input type="password" id="settings-eb" placeholder="Paste your Eventbrite private token..." />
+    <div class="modal-hint">Get yours at <a href="https://www.eventbrite.com/account-settings/apps" target="_blank">eventbrite.com/account-settings/apps</a></div>
+
+    <label>Imgbb API Key <span class="key-status" id="imgbb-status"></span></label>
+    <input type="password" id="settings-imgbb" placeholder="Paste your Imgbb API key..." />
+    <div class="modal-hint">Get yours at <a href="https://api.imgbb.com" target="_blank">api.imgbb.com</a></div>
+
+    <div class="modal-actions">
+      <button onclick="closeSettings()">Cancel</button>
+      <button class="modal-save" onclick="saveSettings()">Save keys</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
