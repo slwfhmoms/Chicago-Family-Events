@@ -377,10 +377,21 @@ async function loadEventbrite() {
       });
     });
     liveEvents = fresh;
-    setStatus(`✓ Loaded ${fresh.length} live events from Eventbrite`);
+    const totalRaw = results.reduce((s, d) => s + (d.events?.length || 0), 0);
+    if (fresh.length === 0 && totalRaw === 0) {
+      setStatus('⚠️ Eventbrite returned 0 results — your token may be expired or CORS is blocking the request. Check ⚙️ settings.');
+    } else {
+      setStatus(`✓ Loaded ${fresh.length} live events from Eventbrite (${totalRaw} found, ${totalRaw - fresh.length} were duplicates)`);
+    }
     populateNeighborhoods(); renderCards();
   } catch(e) {
-    setStatus('⚠️ Couldn\'t reach Eventbrite — showing curated events only');
+    console.error('Eventbrite error:', e);
+    const msg = e?.message || String(e);
+    if (msg.includes('Failed to fetch') || msg.includes('CORS') || msg.includes('NetworkError')) {
+      setStatus('⚠️ Eventbrite blocked by browser security (CORS) — a known issue with hosted apps. Curated events still work fine.');
+    } else {
+      setStatus('⚠️ Eventbrite error: ' + msg.slice(0, 150));
+    }
   }
   btn.innerHTML = '<i class="ti ti-refresh"></i> Refresh live events';
   btn.disabled = false;
@@ -597,6 +608,39 @@ function escapeICS(str) {
 
 const ICAL_DAYS = ['SU','MO','TU','WE','TH','FR','SA'];
 
+// Parse a human time string like "10:00 AM", "6:30 PM", "8:00–11:45 AM" into {h, m}
+// Returns null if time is unknown/all-day
+function parseTime(timeStr) {
+  if (!timeStr) return null;
+  const s = timeStr.trim().toUpperCase();
+  if (/^(ALL DAY|TBD|FLEXIBLE|VARIOUS|DUSK|EVENING|MORNING|AFTERNOON)/.test(s)) return null;
+  // Match first time in string e.g. "10:00 AM", "6:30 PM", "8:00"
+  const m = s.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/);
+  if (!m) return null;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2] || '0');
+  const ampm = m[3];
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return { h, m: min };
+}
+
+// Format a date+time for ICS (local time, no Z = floating)
+function fmtDateTime(date, timeStr) {
+  const t = parseTime(timeStr);
+  const pad = n => String(n).padStart(2,'0');
+  const d = new Date(date);
+  if (!t) {
+    // All-day: return DATE format
+    return { value: `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`, allDay: true };
+  }
+  d.setHours(t.h, t.m, 0, 0);
+  return {
+    value: `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(t.h)}${pad(t.m)}00`,
+    allDay: false
+  };
+}
+
 function eventDescription(e) {
   let d = e.desc || '';
   if (e.imageUrl) d += '\n\n📷 Source image: ' + e.imageUrl;
@@ -629,14 +673,29 @@ function exportICS() {
     if (!next) return;
     const pad = n=>String(n).padStart(2,'0');
     const fmtDate = d=>`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
-    const startStr = fmtDate(next);
-    const endD = new Date(next); endD.setDate(endD.getDate()+1);
-    const endStr = fmtDate(endD);
+    const startDT = fmtDateTime(next, e.time);
+    // End time: 2 hours after start for timed events, next day for all-day
+    let endDT;
+    if (startDT.allDay) {
+      const endD = new Date(next); endD.setDate(endD.getDate()+1);
+      const pad = n=>String(n).padStart(2,'0');
+      endDT = { value: `${endD.getFullYear()}${pad(endD.getMonth()+1)}${pad(endD.getDate())}`, allDay: true };
+    } else {
+      // Parse end time if available (e.g. "10:00 AM – 2:00 PM"), else add 2 hours
+      const timeRange = (e.time||'').match(/[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i);
+      if (timeRange) {
+        endDT = fmtDateTime(next, timeRange[1]);
+      } else {
+        const endD = new Date(next); endD.setHours(endD.getHours()+2);
+        const pad = n=>String(n).padStart(2,'0');
+        endDT = { value: `${endD.getFullYear()}${pad(endD.getMonth()+1)}${pad(endD.getDate())}T${pad(endD.getHours())}${pad(endD.getMinutes())}00`, allDay: false };
+      }
+    }
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${uid}`);
     lines.push(`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,'').split('.')[0]}Z`);
-    lines.push(`DTSTART;VALUE=DATE:${startStr}`);
-    lines.push(`DTEND;VALUE=DATE:${endStr}`);
+    lines.push(startDT.allDay ? `DTSTART;VALUE=DATE:${startDT.value}` : `DTSTART:${startDT.value}`);
+    lines.push(endDT.allDay ? `DTEND;VALUE=DATE:${endDT.value}` : `DTEND:${endDT.value}`);
     lines.push(`SUMMARY:${escapeICS(e.name)}`);
     lines.push(`DESCRIPTION:${escapeICS(eventDescription(e))}`);
     lines.push(`LOCATION:${escapeICS(e.location)}`);
@@ -686,9 +745,25 @@ function buildGCalUrl(e) {
   if (!next) return '#';
   const pad = n=>String(n).padStart(2,'0');
   const fmtDate = d=>`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
-  const start = fmtDate(next);
-  const endD = new Date(next); endD.setDate(endD.getDate()+1);
-  const end = fmtDate(endD);
+  const pad = n=>String(n).padStart(2,'0');
+  const startDT = fmtDateTime(next, e.time);
+  let start, end;
+  if (startDT.allDay) {
+    start = startDT.value;
+    const endD = new Date(next); endD.setDate(endD.getDate()+1);
+    end = `${endD.getFullYear()}${pad(endD.getMonth()+1)}${pad(endD.getDate())}`;
+  } else {
+    start = startDT.value;
+    // Try to parse end time
+    const timeRange = (e.time||'').match(/[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)\s*$/i);
+    if (timeRange) {
+      const endDT = fmtDateTime(next, timeRange[1]);
+      end = endDT.value;
+    } else {
+      const endD = new Date(next); endD.setHours(endD.getHours()+2);
+      end = `${endD.getFullYear()}${pad(endD.getMonth()+1)}${pad(endD.getDate())}T${pad(endD.getHours())}${pad(endD.getMinutes())}00`;
+    }
+  }
   let recur = '';
   if (e.recurDays && e.recurDays.length && e.dateEnd) {
     const byDay = e.recurDays.map(d=>ICAL_DAYS[d]).join(',');
